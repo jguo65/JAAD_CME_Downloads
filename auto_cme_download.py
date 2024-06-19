@@ -1,27 +1,21 @@
 '''
-JAAD CME Download script
+This script combines the functionality of cme_urls.py and download_cme_pdfs.py. Be careful and double check
+when using this script because the URLs from cme_urls.py aren't always guaranteed to be the correct ones for
+the journals. Sometimes the 1st link is actually the 2nd page.
 
-This script taks in the jaad_urls.txt file genereated from cme_urls.py, goes to each URL
-and downloads both part 1 and part 2 CME Journals and their corresponding exams/answer keys.
+Usage:
+    python auto_cme_download.py <start_month> <start_year> <end_month> <end_year>
 
-Per Duaa's requirements:
+    <start_month> : The starting month (name or number)
+    <start_year>  : The starting year (e.g., 2019)
+    <end_month>   : The ending month (name or number)
+    <end_year>    : The ending year (e.g., 2024)
 
-- All files are prepended by "{month} {year} -"
-- The journal articles end in part (I|II).pdf
-- The exams are saved as CME examination (1|2).pdf
-- The exam answers are saved as CME exam answers (1|2).pdf
-
-The script makes a folder for each year. Each year folder will have the corresponding months folders
-inside as well, with each of those month folders containing the 6 files.
-
-The script requires a running instance of chrome with debug commands to connect to in order for
-a human to manually circumvent the bot detection puzzles.
-
-pyautogui is used to save the PDFs so chrome must be the active window when the script is running.
-
-For now, make sure the base_download_dir doesn't have any other files in it (folders are fine). This
-should be updated in the future for better handling.
 '''
+
+import argparse
+from googlesearch import search
+import datetime
 
 import os
 import re
@@ -32,6 +26,58 @@ import pyautogui
 from selenium import webdriver
 from bs4 import BeautifulSoup
 
+# cme_urls.py
+# Define the range of years and months
+months = ["January", "February", "March", "April", "May", "June",
+          "July", "August", "September", "October", "November", "December"]
+
+# Helper function to convert month input to month number
+def get_month_number(month):
+    if isinstance(month, int) or month.isdigit():
+        return int(month)
+    elif isinstance(month, str):
+        return months.index(month.capitalize()) + 1
+    else:
+        raise ValueError("Invalid month input")
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Generate URLs for JAAD CME.')
+parser.add_argument('start_month', type=str, help='Start month (name or number)')
+parser.add_argument('start_year', type=int, help='Start year (e.g., 2019)')
+parser.add_argument('end_month', type=str, help='End month (name or number)')
+parser.add_argument('end_year', type=int, help='End year (e.g., 2024)')
+args = parser.parse_args()
+
+# Convert month inputs to numbers
+start_month_num = get_month_number(args.start_month)
+end_month_num = get_month_number(args.end_month)
+
+# File to store the URLs
+output_file = "jaad_urls.txt"
+
+# Open the file in write mode
+with open(output_file, "w") as file:
+    # Loop through each year and month
+    for year in range(args.start_year, args.end_year + 1):
+        for month in range(1, 13):
+            if (year == args.start_year and month < start_month_num) or (year == args.end_year and month > end_month_num):
+                continue
+            month_name = months[month - 1]
+            # Construct the query
+            query = f"JAAD {month_name} {year} CME"
+
+            # Perform the Google search and get the first result
+            search_results = search(query, num_results=1)
+
+            # Write the result to the file
+            for result in search_results:
+                file.write(f"{result} for {month_name} {year}\n")
+                print(f"{month_name} {year}: {result}")
+                break  # Ensure only the top result is considered
+
+print(f"URLs have been saved to {output_file}")
+
+#download_cme_urls.py
 #Define file paths and directories
 url_file_path = "./jaad_urls.txt"
 base_download_dir = os.path.expanduser('~/Downloads')
@@ -91,18 +137,24 @@ driver = webdriver.Chrome(options=options)
 
 # Navigate to the login page
 driver.get("https://identity.aad.org/?ReturnUrl=%2Felsevier")
-print("Attempting to navigate to login page")
-input("Press enter after completing login")
+print("Manual intervention seems to be required here for now..")
+print("After logging in, manually go to a JAAD CME page and open a PDF")
+print("Pass any bot verification as required and continue")
+input("Press Enter after completing login and bot verification")
 
-driver.get("https://www.jaad.org/issue/S0190-9622(18)X0014-0")
-print("Log in manually and pass any bot verification as required.")
-input("Press Enter to proceed to downloads")
+## Trigger human verification
+#driver.get("https://www.jaad.org/issue/S0190-9622(18)X0014-0")
+#input("Accept cookies and then press Enter to proceed")
+#driver.get("https://www.jaad.org/issue/S0190-9622(18)X0014-0")
+#time.sleep(1)
+#driver.get("https://www.jaad.org/article/S0190-9622(18)30806-5/abstract")
+#print("Log in manually and pass any bot verification as required.")
+#input("Press Enter to proceed to downloads")
 
 # Parse the URL file
 print("Attempting to parse file")
 with open(url_file_path, 'r') as file:
     lines = file.readlines()
-
 
 # Loop through each line in the URL file
 for line in lines:
@@ -162,24 +214,24 @@ for line in lines:
         retry = 3
 
         # Download until we get the 6 we want
-        while saved_files_count < 6 and i < len(pdf_links_and_titles): 
+        while saved_files_count < 6 and i < len(pdf_links_and_titles):
             pdf_path, pdf_title = pdf_links_and_titles[i]
             #print(f"PDF URL: {pdf_url}, Title: {pdf_title}")
-    
+
             # Construct the full URL. They all start with the same jaad.org
             pdf_url = "https://www.jaad.org" + pdf_path
-    
+
             #print(f"Opening and downloading PDF {i + 1}: {pdf_title}")
             #print("The corrected URL is: {}".format(pdf_url))
-    
+
             #Navigate to the PDF link to trigger the download
             #print("Attempting to open PDF")
             driver.get(pdf_url)
             print(" ")
-    
+
             # Wait for PDF to open
             time.sleep(2)
-    
+
             # Trigger ctrl+p to save the pdf
             # We use pyautogui because webdriver actions weren't working
             # This requires chrome to be the active window when the script is running
@@ -190,7 +242,7 @@ for line in lines:
             time.sleep(0.4)
             pyautogui.hotkey('enter')
             time.sleep(1)
-    
+
             # Find the newest downloaded file in the download directory
             # Right now script requires the ~/Download directory to not have any other files
             # to deal with error handling..
@@ -208,7 +260,7 @@ for line in lines:
                 retry = 3
 
             latest_file = max(list_of_files, key=os.path.getctime)
-    
+
             #Define new file path
             base_file_name = f"{month} {year} -"
 
@@ -275,4 +327,5 @@ input("Press Enter to finish the program")
 
 # Close the browser
 driver.quit()
+
 
