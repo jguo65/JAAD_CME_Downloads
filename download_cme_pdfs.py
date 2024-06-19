@@ -1,4 +1,28 @@
-import json
+'''
+JAAD CME Download script
+
+This script taks in the jaad_urls.txt file genereated from cme_urls.py, goes to each URL
+and downloads both part 1 and part 2 CME Journals and their corresponding exams/answer keys.
+
+Per Duaa's requirements:
+
+- All files are prepended by "{month} {year} -"
+- The journal articles end in part (I|II).pdf
+- The exams are saved as CME examination (1|2).pdf
+- The exam answers are saved as CME exam answers (1|2).pdf
+
+The script makes a folder for each year. Each year folder will have the corresponding months folders
+inside as well, with each of those month folders containing the 6 files.
+
+The script requires a running instance of chrome with debug commands to connect to in order for
+a human to manually circumvent the bot detection puzzles.
+
+pyautogui is used to save the PDFs so chrome must be the active window when the script is running.
+
+For now, make sure the base_download_dir doesn't have any other files in it (folders are fine). This
+should be updated in the future for better handling.
+'''
+
 import os
 import re
 import time
@@ -6,17 +30,39 @@ import shutil
 import glob
 import pyautogui
 from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
 from bs4 import BeautifulSoup
 
 #Define file paths and directories
-url_file_path = "/home/deck/jguo6/scripts/python/JAAD_CME/jaad_urls.txt"
+url_file_path = "./jaad_urls.txt"
 base_download_dir = os.path.expanduser('~/Downloads')
-base_target_dir = "/home/deck/jguo6/scripts/python/JAAD_CME/JG_CME_Downloads"
+base_target_dir = "./CME_Downloads"
 
 # Create the base target directory if it doesn't exist already
 if not os.path.exists(base_target_dir):
     os.makedirs(base_target_dir)
+
+# Helper functions
+
+# Function to remove part identifier from Journal Titles
+def remove_part_identifier(title):
+    # Define the regex pattern to match "part 1:", "part 2:", "part I:", or "part II:"
+    pattern = r'\bpart (1|2|II|I)(:|\.)?\s*'
+
+    # Use re.sub to remove the matched pattern from the title
+    title = re.sub(pattern, '', title, flags=re.IGNORECASE)
+    # Replace multiple spaces with a single space
+    title = re.sub(r'\s+', ' ', title).strip()
+    # Replace all instances of " . " with ". "
+    title = re.sub(r'\s\.\s', '. ', title)
+
+    #Check if title has more than 6 words
+    words = title.split()
+    if len(words) > 5:
+        title = ' '.join(words[:5])
+        title = title.rstrip('.,;!?')
+        title += '...'
+
+    return title
 
 # Function to get month in MM format
 def get_month_number(month_name):
@@ -24,21 +70,26 @@ def get_month_number(month_name):
                    "July", "August", "September", "October", "November", "December"]
     return f"{month_names.index(month_name) + 1:02d}"
 
+
 # Set up the Selenium WebDriver with ChromeDriver bundled with Chrome
 print("Setting up Selenium options")
 options = webdriver.ChromeOptions()
 
 # Run chrome in debug with this command
 #    flatpak run com.google.Chrome --remote-debugging-port=9222 --user-data-dir="/home/deck/jguo6/scripts/python/JAAD_CME/custom_chrome_profile"
+#
+# Using ChromeDriver for a separate instance of debug chrome couldn't get around
+# the bot verification when done manually. Work around is to log in and
+# handle the verification and then connect to the already running instance of chrome
 options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
 
 #Connect to existing Chrome instance
-print("Attempting to connect to chrome instance")
+print("Attempting to connect to chrome")
 driver = webdriver.Chrome(options=options)
 
 # Navigate to the login page
-#driver.get("https://identity.aad.org/?ReturnUrl=%2Felsevier")
-#print("Attempting to navigate to login page")
+driver.get("https://identity.aad.org/?ReturnUrl=%2Felsevier")
+print("Attempting to navigate to login page")
 
 print("Log in manually and pass any bot verification as required.")
 input("Press Enter to proceed to downloads")
@@ -47,10 +98,6 @@ input("Press Enter to proceed to downloads")
 print("Attempting to parse file")
 with open(url_file_path, 'r') as file:
     lines = file.readlines()
-
-# Function to remove part identifier from title
-def remove_part_identifier(title):
-    return re.sub(r'\b(part\s*(1|2|I|II)[\.:]?)\b', '', title, flags=re.IGNORECASE).strip()
 
 
 # Loop through each line in the URL file
@@ -62,7 +109,7 @@ for line in lines:
     #print(f"URL is {url}, month is {month} and year is {year}")
 
     # Construct the month-year directory path
-    month_year_dir = os.path.join(base_target_dir, year, f"{month_number}_{year} {month)")
+    month_year_dir = os.path.join(base_target_dir, year, f"{month_number}_{year} {month}")
 
     #print(f"month_year_dir directory is {month_year_dir}")
 
@@ -73,10 +120,10 @@ for line in lines:
 
     # Navigate to the URL
     driver.get(url)
-    #print(f"Attempting to get page for {month} {year}")
     print(" ")
     print(" ")
     print(" ")
+    print(f"Next Journal: {month} {year}")
 
     #After navigating to desired page, give time for page to load
     time.sleep(2)
@@ -102,18 +149,23 @@ for line in lines:
 
     # Print and download the PDF links and titles
     if pdf_links_and_titles:
-        #for pdf_url, pdf_title in pdf_links_and_titles:
-        #    print(f"PDF URL: {pdf_url}, Title: {pdf_title}")
 
-        #Download the first 6 PDF links
-        for i in range(min(6, len(pdf_links_and_titles))):
+        #Download until we get the 6 we want
+        saved_files_count = 0
+        i = 0
+
+        exam_count = 1
+        answers_count = 1
+        retry = 3
+
+        while saved_files_count < 6 and i < len(pdf_links_and_titles): 
             pdf_path, pdf_title = pdf_links_and_titles[i]
+            #print(f"PDF URL: {pdf_url}, Title: {pdf_title}")
     
-            # Construct the full URL
+            # Construct the full URL. They all start with the same jaad.org
             pdf_url = "https://www.jaad.org" + pdf_path
     
             #print(f"Opening and downloading PDF {i + 1}: {pdf_title}")
-    
             #print("The corrected URL is: {}".format(pdf_url))
     
             #Navigate to the PDF link to trigger the download
@@ -124,45 +176,71 @@ for line in lines:
             # Wait for PDF to open
             time.sleep(2)
     
-            # Trigger print dialog using Ctrl+P
+            # Trigger ctrl+p to save the pdf
+            # We use pyautogui because webdriver actions weren't working
+            # This requires chrome to be the active window when the script is running
             #print("Printing to save to pdf...")
             pyautogui.hotkey('ctrl', 'p')
-            time.sleep(1)
+            time.sleep(0.4)
+            pyautogui.hotkey('enter')
+            time.sleep(0.4)
             pyautogui.hotkey('enter')
             time.sleep(1)
-            pyautogui.hotkey('enter')
     
             # Find the newest downloaded file in the download directory
+            # Right now script requires the ~/Download directory to not have any other files
+            # to deal with error handling..
             list_of_files = glob.glob(os.path.join(base_download_dir, '*.pdf'))
+            if not list_of_files:
+                print(f"Error: No PDF file was downloaded for {month} {year}, {pdf_title}.")
+                print(f"Retrying {retry} more time(s)")
+                retry -= 1
+                if retry == 0:
+                    i += 1
+                    retry = 3
+                    print("Couldn't download file after 3 tries, moving to next file")
+                continue
+            else:
+                retry = 3
+
             latest_file = max(list_of_files, key=os.path.getctime)
     
             #Define new file path
             base_file_name = f"{month} {year} -"
 
+            # Janky Hard coded behavior to pull the PDFs we want.
+            # Duaa wants each of the files to be named in a particular way as well.
+            # The exan answer pdfs vary, this has been hardcoded for now to cover all cases
+            # The actual exam pdfs always contain "CME examination"
+            # Assume the first pdf link is part 1. This seems like a safe bet for now
+            # If it's not any of the above it's probably the 2nd journal if we've already
+            #    downloaded 3-4 files, otherwise it's unknown and flagged for review
             if i == 0:
                 pdf_title = remove_part_identifier(pdf_title)
                 new_file_name = f"{base_file_name} {pdf_title} part I.pdf"
-            elif i == 3:
+            elif pdf_title == "PDF" or "Answers to CME examination" in pdf_title or pdf_title == "Supplemental Materials":
+                new_file_name = f"{base_file_name} CME exam answers {answers_count}.pdf"
+                answers_count += 1
+            elif "CME examination" in pdf_title:
+                new_file_name = f"{base_file_name} CME examination {exam_count}.pdf"
+                exam_count += 1
+            elif "Game Changers" in pdf_title: # Skip Game Changers
+                i += 1
+                os.remove(latest_file) #Delete the downloaded file we are skipping
+                continue
+            elif i in [3, 4]: #if we're 4th or 5th, prob part 2 if we aren't exam or answers
+                # this part is kind of janky, might need to replace
                 pdf_title = remove_part_identifier(pdf_title)
                 new_file_name = f"{base_file_name} {pdf_title} part II.pdf"
-            elif i in [1, 2]:
-                if pdf_title == "PDF":
-                    new_file_name = f"{base_file_name} CME exam answers 1.pdf"
-                elif "CME examinations" in pdf_title or "CME" in pdf_title or "examination" in pdf_title:
-                    new_file_name = f"{base_file_name} CME examination 1.pdf"
-                else:
-                    print("!!! WARNING UNKNOWN FILE !!!")
-                    new_file_name = f"{base_file_name} UNKNOWN {i}"
-            elif i in [4, 5]:
-                if pdf_title == "PDF":
-                    new_file_name = f"{base_file_name} CME exam answers 2.pdf"
-                elif "CME examinations" in pdf_title or "CME" in pdf_title or "examination" in pdf_title:
-                    new_file_name = f"{base_file_name} CME examination 2.pdf"
-                else:
-                    print("!!!WARNING UNKNOWN FILE !!!")
-                    new_file_name = f"{base_file_name} UNKNOWN {i}"
-            else:
-                new_file_name = f"{base_file_name} {pdf_title}.pdf"
+            else: # assume it is part 2 anyways, but flag for review. don't increase saved files count
+                print("!!! WARNING UNKOWN FILE !!! Saving anyways, please review!")
+                new_file_name = f"PDF {i+1} - {base_file_name} {pdf_title} <<REVIEW.pdf"
+                review_path = os.path.join(month_year_dir, "review")
+                if not os.path.exists(review_path):
+                    with open(review_path, 'w') as file:
+                        pass # The 'pass' is a placeholder
+
+
 
             new_file_path = os.path.join(month_year_dir, new_file_name.replace("/", "_"))
 
@@ -183,12 +261,15 @@ for line in lines:
             print("*************************************************************************** ")
             print(" ")
 
+            # Update counters
+            i += 1
+            saved_files_count += 1
 
 else:
-    print("No PDF links found on the page.")
+    print("Script has completed!")
 
 # Keep the browser open for manual inspection
-input("Press Enter to close the browser...")
+input("Press Enter to finish the program")
 
 # Close the browser
 driver.quit()
